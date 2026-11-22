@@ -1,0 +1,2432 @@
+--[[
+	vexity.wtf | Hub (key system + loader)
+	Key: vexitywowcursedXD
+
+	Flow: key system -> if the game is supported, a single vexity notification
+	appears and the game script loads instantly (no loader interface at all).
+	If the game is not supported, a small vexity-themed dialog asks whether to
+	run the universal script instead.
+
+	Game detection matches the UNIVERSE id first (plus place id and name), so
+	alternate places like pro servers / ranked / updated root places still count
+	as supported.
+]]
+
+-- ============================================================
+-- VEXITY NOTIFICATIONS (black & white, shared by key system + loader)
+-- ============================================================
+local NotifyTweenService = game:GetService("TweenService")
+
+local notifyParent
+do
+	local ok, hidden = pcall(function() return gethui and gethui() end)
+	if ok and hidden then
+		notifyParent = hidden
+	else
+		notifyParent = game:GetService("CoreGui")
+	end
+end
+
+local notifyGui = notifyParent:FindFirstChild("VexityNotifs") or Instance.new("ScreenGui")
+notifyGui.Name = "VexityNotifs"
+notifyGui.ResetOnSpawn = false
+notifyGui.DisplayOrder = 2147483647
+notifyGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+notifyGui.Parent = notifyParent
+pcall(function() notifyGui.IgnoreGuiInset = true end)
+
+local notifyToast = notifyGui:FindFirstChild("Toast") or Instance.new("Frame")
+notifyToast.Name = "Toast"
+notifyToast.AnchorPoint = Vector2.new(0.5, 1)
+notifyToast.Position = UDim2.new(0.5, 0, 1.055, 0)
+notifyToast.BackgroundColor3 = Color3.fromHex("#181818")
+notifyToast.BorderSizePixel = 0
+notifyToast.ZIndex = 10
+notifyToast.Parent = notifyGui
+Instance.new("UICorner", notifyToast).CornerRadius = UDim.new(0, 10)
+local notifyToastStroke = notifyToast:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke", notifyToast)
+notifyToastStroke.Color = Color3.fromHex("#4A4A4A")
+notifyToastStroke.Thickness = 1
+notifyToastStroke.Transparency = 0.35
+
+local notifyIcon = notifyToast:FindFirstChild("Icon") or Instance.new("TextLabel", notifyToast)
+notifyIcon.Name = "Icon"
+notifyIcon.AnchorPoint = Vector2.new(0, 0.5)
+notifyIcon.Position = UDim2.fromOffset(12, 0)
+notifyIcon.Size = UDim2.fromOffset(20, 20)
+notifyIcon.BackgroundTransparency = 1
+notifyIcon.Font = Enum.Font.GothamBold
+notifyIcon.TextSize = 14
+notifyIcon.Text = "i"
+notifyIcon.TextColor3 = Color3.fromHex("#FFFFFF")
+notifyIcon.ZIndex = 11
+notifyIcon.TextXAlignment = Enum.TextXAlignment.Center
+notifyIcon.TextYAlignment = Enum.TextYAlignment.Center
+
+local notifyText = notifyToast:FindFirstChild("Text") or Instance.new("TextLabel", notifyToast)
+notifyText.Name = "Text"
+notifyText.Position = UDim2.fromOffset(38, 0)
+notifyText.Size = UDim2.new(1, -50, 1, -2)
+notifyText.BackgroundTransparency = 1
+notifyText.Font = Enum.Font.GothamMedium
+notifyText.TextSize = 11
+notifyText.TextColor3 = Color3.fromHex("#F2F2F2")
+notifyText.TextXAlignment = Enum.TextXAlignment.Left
+notifyText.TextYAlignment = Enum.TextYAlignment.Center
+notifyText.TextTruncate = Enum.TextTruncate.AtEnd
+notifyText.ZIndex = 11
+
+local notifyBar = notifyToast:FindFirstChild("Bar") or Instance.new("Frame", notifyToast)
+notifyBar.Name = "Bar"
+notifyBar.AnchorPoint = Vector2.new(0, 1)
+notifyBar.Position = UDim2.fromScale(0, 1)
+notifyBar.Size = UDim2.new(1, 0, 0, 2)
+notifyBar.BackgroundColor3 = Color3.fromHex("#FFFFFF")
+notifyBar.BorderSizePixel = 0
+notifyBar.ZIndex = 11
+Instance.new("UICorner", notifyBar).CornerRadius = UDim.new(0, 1)
+
+local notifyToken = 0
+local notifyBarTween
+
+local function VexityNotify(text, kind)
+	notifyToken += 1
+	local token = notifyToken
+
+	local color = Color3.fromHex("#FFFFFF")
+	local icon = "i"
+	if kind == "good" then
+		color = Color3.fromHex("#6FCF97")
+		icon = "✓"
+	elseif kind == "bad" then
+		icon = "!"
+	elseif kind == "warning" then
+		color = Color3.fromHex("#E0A458")
+		icon = "!"
+	end
+
+	notifyIcon.Text = icon
+	notifyIcon.TextColor3 = color
+	notifyText.Text = tostring(text or "")
+	notifyBar.BackgroundColor3 = color
+	notifyBar.BackgroundTransparency = 0.15
+	notifyBar.Size = UDim2.new(1, 0, 0, 2)
+
+	if notifyBarTween then
+		notifyBarTween:Cancel()
+	end
+	notifyBarTween = NotifyTweenService:Create(
+		notifyBar,
+		TweenInfo.new(2.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(0, 0, 0, 2) }
+	)
+	notifyBarTween:Play()
+
+	NotifyTweenService:Create(
+		notifyToast,
+		TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Position = UDim2.new(0.5, 0, 0.955, 0) }
+	):Play()
+
+	task.delay(2.7, function()
+		if token ~= notifyToken then return end
+		NotifyTweenService:Create(
+			notifyToast,
+			TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Position = UDim2.new(0.5, 0, 1.055, 0) }
+		):Play()
+	end)
+end
+local function runVexityLoader()
+--// Vexity loader — no interface //--
+-- Supported game: one vexity notification, then the game script loads.
+-- Unsupported game: small themed dialog with RUN IT / CONTINUE and CLOSE.
+
+local Marketplace = game:GetService("MarketplaceService")
+local LoaderTween = game:GetService("TweenService")
+
+local BASE = "https://raw.githubusercontent.com/rskyxcheat049-png/vexity.wtf/refs/heads/main/"
+local UNIVERSAL_URL = BASE .. "vexity%20universal.protected.lua.txt"
+
+-- PlaceId is the legacy check, UniverseId covers ranked/pro servers, updated
+-- root places and alternate places inside the same experience. Names are a
+-- last-resort fallback so nothing is needlessly locked out.
+local GameList = {
+	{ Name = "Blade Ball",             PlaceId = 13772394625,  UniverseId = 4777817887, Script = BASE .. "vexity%20blade%20ball.txt",                 Names = { "blade ball" } },
+	{ Name = "Evade",                  PlaceId = 9872472334,   UniverseId = 3647333358, Script = BASE .. "evade.txt",                                 Names = { "evade" } },
+	{ Name = "Violence District",      PlaceId = 93978595733734, UniverseId = 6739698191, Script = BASE .. "vexity_vd.protected.lua.txt",             Names = { "violence district" } },
+	{ Name = "Rivals",                 PlaceId = 17625359962,  UniverseId = 6035872082, Script = BASE .. "vexity%20rivals.txt",                       Names = { "rivals" } },
+	{ Name = "Fling Things and People",PlaceId = 6961824067,   UniverseId = 2668101271, Script = BASE .. "vexity%20ftap.protected.lua.txt",           Names = { "fling things and people", "fling things & people" } },
+	{ Name = "Murder Mystery 2",       PlaceId = 142823291,    UniverseId = 66654135,  Script = BASE .. "vexity%20mm2.txt",                            Names = { "murder mystery 2", "mm2" } },
+	{ Name = "Arsenal",                PlaceId = 286090429,    UniverseId = 111958650, Script = BASE .. "vexity%20arsenal.txt",                        Names = { "arsenal" } },
+	{ Name = "MVSD",                   PlaceId = 12355337193,  UniverseId = 4348829796, Script = BASE .. "vexity%20mvsd%20murders%20vs%20sherrifs.txt", Names = { "murderers vs sheriffs duels", "mvsd" } },
+	{ Name = "Morocco Hangout",        PlaceId = 94953662071364, UniverseId = 6986909865, Script = BASE .. "Morroco%20hangout.txt",                   Names = { "morocco hangout" } },
+}
+
+local placeId = game.PlaceId
+local universeId = tonumber(game.GameId) or 0
+local gameName = tostring((game.Name ~= "" and game.Name) or "Unknown Game")
+
+-- GetProductInfo is a YIELDING call. In some games (Rivals especially, once
+-- the loader is obfuscated) it can hang forever and kill the whole startup,
+-- which is why nothing - not even the intro/notifications - appeared.
+-- It is only used to prettify the displayed name, so run it detached and
+-- never let it block the intro.
+task.spawn(function()
+	local ok, info = pcall(function()
+		return Marketplace:GetProductInfo(placeId)
+	end)
+	if ok and info and type(info.Name) == "string" and info.Name ~= "" then
+		gameName = info.Name
+	end
+end)
+
+local function normalizeName(value)
+	return tostring(value or ""):lower():gsub("[^%w%s]", " "):gsub("%s+", " ")
+end
+
+local matched
+for _, g in ipairs(GameList) do
+	if g.PlaceId == placeId or (universeId > 0 and g.UniverseId == universeId) then
+		matched = g
+		break
+	end
+end
+if not matched then
+	local current = normalizeName(gameName)
+	for _, g in ipairs(GameList) do
+		for _, alias in ipairs(g.Names) do
+			if string.find(current, alias, 1, true) then
+				matched = g
+				break
+			end
+		end
+		if matched then break end
+	end
+end
+
+local function loadScript(url, label)
+	if type(url) ~= "string" or url == "" then return end
+	task.spawn(function()
+		local ok, fn = pcall(function() return loadstring(game:HttpGet(url)) end)
+		if ok and type(fn) == "function" then
+			task.spawn(function() pcall(fn) end)
+		else
+			VexityNotify("Failed to load " .. label, "bad")
+		end
+	end)
+end
+
+local function secureParent()
+	local ok, hidden = pcall(function()
+		if gethui then return gethui() end
+		if get_hidden_gui then return get_hidden_gui() end
+	end)
+	if ok and hidden then return hidden end
+	return game:GetService("CoreGui")
+end
+
+local function showUniversalPrompt()
+	pcall(function()
+		local old = secureParent():FindFirstChild("VexityUnsupported")
+		if old then old:Destroy() end
+	end)
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "VexityUnsupported"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 2147483647
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = secureParent()
+
+	local dim = Instance.new("TextButton", gui)
+	dim.Size = UDim2.fromScale(1, 1)
+	dim.BackgroundColor3 = Color3.new(0, 0, 0)
+	dim.BackgroundTransparency = 0.55
+	dim.BorderSizePixel = 0
+	dim.AutoButtonColor = false
+	dim.Text = ""
+	dim.ZIndex = 1
+
+	local panel = Instance.new("Frame", gui)
+	panel.AnchorPoint = Vector2.new(0.5, 0.5)
+	panel.Position = UDim2.fromScale(0.5, 0.5)
+	panel.Size = UDim2.fromOffset(370, 258)
+	panel.BackgroundColor3 = Color3.fromHex("#0D0D0D")
+	panel.BorderSizePixel = 0
+	panel.ZIndex = 2
+	panel.Parent = gui
+	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
+	local stroke = Instance.new("UIStroke", panel)
+	stroke.Color = Color3.fromHex("#FFFFFF")
+	stroke.Thickness = 1.5
+	stroke.Transparency = 0.35
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+	local scale = Instance.new("UIScale", panel)
+	pcall(function()
+		local cam = workspace.CurrentCamera
+		local vs = cam and cam.ViewportSize
+		if vs then
+			scale.Scale = math.clamp(math.min(vs.X / 430, vs.Y / 330), 0.55, 1)
+		end
+	end)
+
+	local badge = Instance.new("Frame", panel)
+	badge.AnchorPoint = Vector2.new(0.5, 0)
+	badge.Position = UDim2.new(0.5, 0, 0, 20)
+	badge.Size = UDim2.fromOffset(48, 48)
+	badge.BackgroundColor3 = Color3.fromHex("#202020")
+	badge.BorderSizePixel = 0
+	badge.ZIndex = 3
+	Instance.new("UICorner", badge).CornerRadius = UDim.new(1, 0)
+	local badgeStroke = Instance.new("UIStroke", badge)
+	badgeStroke.Color = Color3.fromHex("#FFFFFF")
+	badgeStroke.Thickness = 1.25
+	badgeStroke.Transparency = 0.4
+
+	local badgeText = Instance.new("TextLabel", badge)
+	badgeText.Size = UDim2.fromScale(1, 1)
+	badgeText.BackgroundTransparency = 1
+	badgeText.Font = Enum.Font.GothamBlack
+	badgeText.TextSize = 26
+	badgeText.TextColor3 = Color3.fromHex("#FFFFFF")
+	badgeText.Text = "!"
+	badgeText.ZIndex = 4
+
+	local title = Instance.new("TextLabel", panel)
+	title.Position = UDim2.fromOffset(22, 76)
+	title.Size = UDim2.new(1, -44, 0, 54)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 17
+	title.TextWrapped = true
+	title.TextColor3 = Color3.fromHex("#FFFFFF")
+	title.Text = "The game is not supported —\nwanna run universal script instead?"
+	title.ZIndex = 3
+
+	local subtitle = Instance.new("TextLabel", panel)
+	subtitle.Position = UDim2.fromOffset(22, 132)
+	subtitle.Size = UDim2.new(1, -44, 0, 18)
+	subtitle.BackgroundTransparency = 1
+	subtitle.Font = Enum.Font.Gotham
+	subtitle.TextSize = 11
+	subtitle.TextColor3 = Color3.fromHex("#929292")
+	subtitle.TextTruncate = Enum.TextTruncate.AtEnd
+	subtitle.Text = "Currently in: " .. gameName
+	subtitle.ZIndex = 3
+
+	local runBtn = Instance.new("TextButton", panel)
+	runBtn.AnchorPoint = Vector2.new(0.5, 0)
+	runBtn.Position = UDim2.new(0.5, 0, 0, 162)
+	runBtn.Size = UDim2.fromOffset(320, 44)
+	runBtn.BackgroundColor3 = Color3.fromHex("#FFFFFF")
+	runBtn.BorderSizePixel = 0
+	runBtn.AutoButtonColor = false
+	runBtn.Font = Enum.Font.GothamBlack
+	runBtn.TextSize = 14
+	runBtn.TextColor3 = Color3.new(0, 0, 0)
+	runBtn.Text = "RUN IT / CONTINUE"
+	runBtn.ZIndex = 3
+	Instance.new("UICorner", runBtn).CornerRadius = UDim.new(0, 10)
+
+	local closeBtn = Instance.new("TextButton", panel)
+	closeBtn.AnchorPoint = Vector2.new(0.5, 0)
+	closeBtn.Position = UDim2.new(0.5, 0, 0, 214)
+	closeBtn.Size = UDim2.fromOffset(320, 36)
+	closeBtn.BackgroundColor3 = Color3.fromHex("#1A1A1A")
+	closeBtn.BorderSizePixel = 0
+	closeBtn.AutoButtonColor = false
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 12
+	closeBtn.TextColor3 = Color3.fromHex("#FFFFFF")
+	closeBtn.Text = "CLOSE"
+	closeBtn.ZIndex = 3
+	Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
+	local closeStroke = Instance.new("UIStroke", closeBtn)
+	closeStroke.Color = Color3.fromHex("#505050")
+	closeStroke.Thickness = 1
+	closeStroke.Transparency = 0.5
+
+	local function closePrompt()
+		LoaderTween:Create(panel, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Size = UDim2.fromOffset(348, 238) }):Play()
+		task.delay(0.18, function() pcall(function() gui:Destroy() end) end)
+	end
+
+	runBtn.MouseButton1Click:Connect(function()
+		gui:Destroy()
+		VexityNotify("Loading universal script", "info")
+		loadScript(UNIVERSAL_URL, "universal script")
+	end)
+	closeBtn.MouseButton1Click:Connect(closePrompt)
+	dim.MouseButton1Click:Connect(closePrompt)
+
+	panel.Size = UDim2.fromOffset(348, 238)
+	LoaderTween:Create(panel, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Size = UDim2.fromOffset(370, 258) }):Play()
+end
+
+--// INTRO: horizontal logo + glowing wordmark, pure smooth fade //--
+local function playIntro(done)
+	pcall(function()
+		local old = secureParent():FindFirstChild("VexityIntro")
+		if old then old:Destroy() end
+	end)
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "VexityIntro"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 2147483647
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = secureParent()
+
+	local cover = Instance.new("Frame", gui)
+	cover.Size = UDim2.fromScale(1, 1)
+	cover.BackgroundColor3 = Color3.new(0, 0, 0)
+	cover.BackgroundTransparency = 0
+	cover.BorderSizePixel = 0
+	cover.ZIndex = 5000
+
+	local fit = 1
+	pcall(function()
+		local cam = workspace.CurrentCamera
+		local vs = cam and cam.ViewportSize
+		if vs and vs.X > 10 then
+			fit = math.clamp(math.min(vs.X / 1066, vs.Y / 600), 0.45, 1.25)
+		end
+	end)
+
+	local lockup = Instance.new("Frame", cover)
+	lockup.AnchorPoint = Vector2.new(0.5, 0.5)
+	lockup.Position = UDim2.fromScale(0.5, 0.5)
+	lockup.Size = UDim2.fromOffset(560, 130)
+	lockup.BackgroundTransparency = 1
+	lockup.ZIndex = 5010
+	local lockScale = Instance.new("UIScale", lockup)
+	lockScale.Scale = fit * 0.94
+	local hList = Instance.new("UIListLayout", lockup)
+	hList.FillDirection = Enum.FillDirection.Horizontal
+	hList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	hList.VerticalAlignment = Enum.VerticalAlignment.Center
+	hList.Padding = UDim.new(0, 22)
+
+	local logoHolder = Instance.new("Frame", lockup)
+	logoHolder.Size = UDim2.fromOffset(112, 112)
+	logoHolder.BackgroundTransparency = 1
+	logoHolder.ZIndex = 5011
+	local logo = Instance.new("ImageLabel", logoHolder)
+	logo.AnchorPoint = Vector2.new(0.5, 0.5)
+	logo.Position = UDim2.fromScale(0.5, 0.5)
+	logo.Size = UDim2.fromOffset(100, 100)
+	logo.BackgroundTransparency = 1
+	logo.Image = "rbxassetid://72558098168066"
+	logo.ScaleType = Enum.ScaleType.Fit
+	logo.ImageTransparency = 1
+	logo.ZIndex = 5012
+
+	local wordBlock = Instance.new("Frame", lockup)
+	wordBlock.Size = UDim2.fromOffset(360, 116)
+	wordBlock.BackgroundTransparency = 1
+	wordBlock.ZIndex = 5011
+	local vList = Instance.new("UIListLayout", wordBlock)
+	vList.FillDirection = Enum.FillDirection.Vertical
+	vList.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	vList.VerticalAlignment = Enum.VerticalAlignment.Center
+	vList.Padding = UDim.new(0, 0)
+
+	local title = Instance.new("TextLabel", wordBlock)
+	title.Size = UDim2.fromOffset(360, 84)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBlack
+	title.TextSize = 66
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.Text = "vexity.wtf"
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextTransparency = 1
+	title.ZIndex = 5013
+	local grad = Instance.new("UIGradient", title)
+	grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromHex("6A6A6A")),
+		ColorSequenceKeypoint.new(0.45, Color3.fromHex("FFFFFF")),
+		ColorSequenceKeypoint.new(0.55, Color3.fromHex("FFFFFF")),
+		ColorSequenceKeypoint.new(1, Color3.fromHex("6A6A6A")),
+	})
+	grad.Rotation = 90
+
+	local sub = Instance.new("TextLabel", wordBlock)
+	sub.Size = UDim2.fromOffset(360, 28)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.GothamBold
+	sub.TextSize = 15
+	sub.TextColor3 = Color3.fromHex("#929292")
+	sub.Text = "B Y   C U R R S E D X"
+	sub.TextXAlignment = Enum.TextXAlignment.Left
+	sub.TextTransparency = 1
+	sub.ZIndex = 5013
+
+	-- slow sheen sweep on the wordmark
+	task.spawn(function()
+		while gui.Parent and grad do
+			LoaderTween:Create(grad, TweenInfo.new(3, Enum.EasingStyle.Sine),
+				{ Rotation = 160 }):Play()
+			task.wait(3.1)
+			if not gui.Parent then break end
+			LoaderTween:Create(grad, TweenInfo.new(3, Enum.EasingStyle.Sine),
+				{ Rotation = 20 }):Play()
+			task.wait(3.1)
+		end
+	end)
+
+	-- fade in -> hold -> fade out -> continue
+	task.spawn(function()
+		task.wait(0.12)
+		if not gui.Parent then return end
+		LoaderTween:Create(lockScale, TweenInfo.new(1.0, Enum.EasingStyle.Quint),
+			{ Scale = fit }):Play()
+		LoaderTween:Create(logo, TweenInfo.new(0.9), { ImageTransparency = 0 }):Play()
+		LoaderTween:Create(title, TweenInfo.new(0.95), { TextTransparency = 0 }):Play()
+		LoaderTween:Create(sub, TweenInfo.new(1.0), { TextTransparency = 0 }):Play()
+		task.wait(1.15)
+		if not gui.Parent then return end
+		task.wait(1.4) -- hold
+		if not gui.Parent then return end
+		LoaderTween:Create(cover, TweenInfo.new(0.75), { BackgroundTransparency = 1 }):Play()
+		LoaderTween:Create(logo, TweenInfo.new(0.7), { ImageTransparency = 1 }):Play()
+		LoaderTween:Create(title, TweenInfo.new(0.7), { TextTransparency = 1 }):Play()
+		LoaderTween:Create(sub, TweenInfo.new(0.7), { TextTransparency = 1 }):Play()
+		LoaderTween:Create(lockScale, TweenInfo.new(0.8, Enum.EasingStyle.Sine),
+			{ Scale = fit * 1.03 }):Play()
+		task.wait(0.8)
+		pcall(function() gui:Destroy() end)
+		task.spawn(done)
+	end)
+end
+
+local loaderDone = false
+local function finishLoader()
+	if loaderDone then return end
+	loaderDone = true
+	if matched then
+		VexityNotify(gameName .. " is supported — loading script", "good")
+		loadScript(matched.Script, matched.Name)
+	else
+		showUniversalPrompt()
+	end
+end
+
+print("[vexity] loader start | place=" .. tostring(placeId)
+	.. " universe=" .. tostring(universeId)
+	.. " name=" .. gameName
+	.. " matched=" .. tostring(matched and matched.Name or "none"))
+
+-- Never fail silently: if the intro errors (obfuscator can mangle tweens or
+-- task.spawn callbacks), report it and continue straight to loading.
+task.spawn(function()
+	local ok, err = pcall(playIntro, finishLoader)
+	if not ok then
+		warn("[vexity] intro failed: " .. tostring(err))
+		finishLoader()
+	end
+end)
+
+-- Watchdog: if for any reason the intro never reaches its callback, load the
+-- script anyway after 8s so Rivals (or any game) is never left with nothing.
+task.delay(8, function()
+	if loaderDone then return end
+	warn("[vexity] loader watchdog fired — forcing script load")
+	finishLoader()
+end)
+
+_G.VexityLoader = {
+	Supported = matched ~= nil,
+	Game = matched and matched.Name or gameName,
+	Destroy = function()
+		pcall(function()
+			local old = secureParent():FindFirstChild("VexityUnsupported")
+			if old then old:Destroy() end
+		end)
+	end,
+}
+end
+
+--[[
+	vexity.wtf | Hub v2.1
+	Key: vexitywowcursedXD
+
+	Black & white UI · Key / Games tabs · snow · stacked max blur · custom notify
+	Live game data (real universe IDs, real icons, creator + playing counts)
+	No red UI anywhere · icon placeholders never show a blank/red square
+	Mobile-friendly auto scaling · draggable panel · saved key support
+]]
+
+local Players            = game:GetService("Players")
+local TweenService       = game:GetService("TweenService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Lighting           = game:GetService("Lighting")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local HttpService        = game:GetService("HttpService")
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+
+local CONFIG = {
+	-- Keys are validated case-insensitively, so they must be stored lowercase.
+	ValidKeys = {
+		["vexitywowcursedxd"] = true,
+	},
+	GetKeyURL  = "https://discord.gg/HKCdkzZqf",
+	DiscordURL = "https://discord.gg/HKCdkzZqf",
+	Note       = "The key is only one time on the dc no ads no checkpoint",
+	LogoID     = "rbxassetid://72558098168066",
+	SaveFile   = "vexity_key.txt",
+	Version    = "1.0",
+
+	-- Optional: put a raw script URL here and it will load after a valid key.
+	-- You can also set getgenv().VexityMainScriptURL at runtime.
+	MainScriptURL = "",
+}
+
+-- status: "working" = green · "partial" = amber · unsupported = gray (never red)
+local GAMES = {
+	{
+		name = "Blade Ball",
+		placeId = 13772394625,
+		universeId = 4777817887,
+		status = "working",
+	},
+	{
+		name = "Evade",
+		placeId = 9872472334,
+		universeId = 3647333358,
+		status = "working",
+	},
+	{
+		name = "Violence District",
+		placeId = 93978595733734,
+		universeId = 6739698191,
+		status = "working",
+	},
+	{
+		name = "Rivals",
+		placeId = 17625359962,
+		universeId = 6035872082,
+		status = "working",
+	},
+	{
+		name = "Fling Things and People",
+		placeId = 6961824067,
+		universeId = 2668101271,
+		status = "working",
+	},
+	{
+		name = "Murder Mystery 2",
+		placeId = 142823291,
+		universeId = 66654135,
+		status = "working",
+	},
+	{
+		name = "Arsenal",
+		placeId = 286090429,
+		universeId = 111958650,
+		status = "working",
+	},
+	{
+		name = "MVSD",
+		placeId = 12355337193,
+		universeId = 4348829796,
+		status = "working",
+	},
+	{
+		name = "Morocco Hangout",
+		placeId = 94953662071364,
+		universeId = 6986909865,
+		status = "partial",
+	},
+}
+
+-- ============================================================
+-- THEME (black & white, no red)
+-- ============================================================
+
+local T = {
+	Bg       = "#080808",
+	Surface  = "#101010",
+	Surface2 = "#181818",
+	Surface3 = "#232323",
+	Stroke   = "#2A2A2A",
+	StrokeHi = "#4A4A4A",
+	White    = "#FFFFFF",
+	Text     = "#F2F2F2",
+	Muted    = "#767676",
+	Green    = "#6FCF97",
+	Amber    = "#E0A458",
+	Gray     = "#8A8A8A",
+}
+for key, value in pairs(T) do
+	T[key] = Color3.fromHex(value)
+end
+
+local STATUS = {
+	working = {
+		color = T.Green,
+		text = "Working",
+		short = "Working",
+	},
+	partial = {
+		color = T.Amber,
+		text = "Partially working",
+		short = "Partially working",
+	},
+	unsupported = {
+		color = T.Gray,
+		text = "Not supported",
+		short = "Unsupported",
+	},
+	universal = {
+		color = T.White,
+		text = "Universal",
+		short = "Universal",
+	},
+}
+
+local currentGame
+for _, gameInfo in ipairs(GAMES) do
+	if gameInfo.placeId == game.PlaceId then
+		currentGame = gameInfo
+		break
+	end
+	if gameInfo.universeId and gameInfo.universeId == game.GameId then
+		currentGame = gameInfo
+		break
+	end
+end
+local currentInfo = currentGame and STATUS[currentGame.status] or STATUS.unsupported
+
+local function cleanName(raw)
+	if type(raw) ~= "string" then
+		return ""
+	end
+	local value = raw
+	value = value:gsub("%b[]%s*", "")
+	value = value:gsub("[^\32-\126]", "")
+	value = value:gsub("%s+", " ")
+	value = value:gsub("^%s+", ""):gsub("%s+$", "")
+	return value
+end
+
+local currentPlaceName = cleanName(game.Name)
+if currentPlaceName == "" then
+	currentPlaceName = tostring(game.Name)
+end
+
+local dataLoaded = false
+local gameViews = {}
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+
+local function corner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 10)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color or T.Stroke
+	s.Thickness = thickness or 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function label(parent, text, size, color, font, props)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.BorderSizePixel = 0
+	l.Text = text or ""
+	l.TextSize = size or 13
+	l.TextColor3 = color or T.Text
+	l.Font = font or Enum.Font.GothamMedium
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.RichText = false
+	l.Parent = parent
+	if props then
+		for key, value in pairs(props) do
+			l[key] = value
+		end
+	end
+	return l
+end
+
+local function tween(object, duration, props, style, direction)
+	local ok, result = pcall(function()
+		return TweenService:Create(
+			object,
+			TweenInfo.new(
+				duration or 0.2,
+				style or Enum.EasingStyle.Quad,
+				direction or Enum.EasingDirection.Out
+			),
+			props
+		)
+	end)
+	if ok and result then
+		result:Play()
+		return result
+	end
+	return nil
+end
+
+local function dot(parent, color, x, y, diameter)
+	local d = Instance.new("Frame")
+	d.Size = UDim2.fromOffset(diameter or 8, diameter or 8)
+	d.Position = UDim2.fromOffset(x or 0, y or 0)
+	d.BackgroundColor3 = color or T.White
+	d.BorderSizePixel = 0
+	d.ZIndex = 5
+	d.Parent = parent
+	corner(d, (diameter or 8) / 2)
+	return d
+end
+
+local function formatCount(value)
+	local n = tonumber(value)
+	if not n or n < 0 then
+		return "--"
+	end
+	if n >= 1e9 then
+		return (string.format("%.1f", n / 1e9):gsub("%.0$", "")) .. "B"
+	elseif n >= 1e6 then
+		return (string.format("%.1f", n / 1e6):gsub("%.0$", "")) .. "M"
+	elseif n >= 1e3 then
+		return (string.format("%.1f", n / 1e3):gsub("%.0$", "")) .. "K"
+	end
+	return tostring(math.floor(n))
+end
+
+local function initials(name)
+	local words = {}
+	for word in tostring(name or ""):gmatch("%a+") do
+		words[#words + 1] = word
+	end
+	if #words >= 2 then
+		return (words[1]:sub(1, 1) .. words[2]:sub(1, 1)):upper()
+	elseif #words == 1 then
+		return words[1]:sub(1, 2):upper()
+	end
+	return "?"
+end
+
+local function copyValue(value)
+	if type(setclipboard) ~= "function" then
+		return false
+	end
+	local ok = pcall(setclipboard, tostring(value))
+	return ok
+end
+
+local function iconURL(universeId)
+	local id = tonumber(universeId)
+	if not id or id <= 0 then
+		return nil
+	end
+	return "rbxthumb://type=GameIcon&id=" .. tostring(math.floor(id)) .. "&w=150&h=150"
+end
+
+local function currentUniverseId()
+	local id = tonumber(game.GameId)
+	if id and id > 0 then
+		return id
+	end
+	if currentGame and currentGame.universeId then
+		return currentGame.universeId
+	end
+	return nil
+end
+
+local function setIcon(image, url)
+	if not image or type(url) ~= "string" or url == "" then
+		return
+	end
+	image.Image = url
+	image.ImageTransparency = 0
+end
+
+local function makeIcon(parent, size, initialText)
+	local holder = Instance.new("Frame")
+	holder.Name = "Icon"
+	holder.Size = UDim2.fromOffset(size, size)
+	holder.BackgroundColor3 = T.Surface2
+	holder.BorderSizePixel = 0
+	holder.ClipsDescendants = true
+	holder.ZIndex = 4
+	holder.Parent = parent
+	corner(holder, math.floor(size * 0.22))
+
+	local text = label(holder, initialText or "?", math.floor(size * 0.34), T.Muted, Enum.Font.GothamBold, {
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		ZIndex = 5,
+	})
+
+	local image = Instance.new("ImageLabel")
+	image.Name = "Image"
+	image.Size = UDim2.fromScale(1, 1)
+	image.BackgroundTransparency = 1
+	image.BorderSizePixel = 0
+	image.ImageTransparency = 0
+	image.ScaleType = Enum.ScaleType.Crop
+	image.ZIndex = 6
+	image.Parent = holder
+	corner(image, math.floor(size * 0.22))
+
+	return holder, image, text
+end
+
+-- Forward-declared because the games rows are built before the notify UI exists.
+local notify
+
+-- ============================================================
+-- CLEANUP PREVIOUS RUNS
+-- ============================================================
+
+do
+	local roots = {}
+	local seen = {}
+	local function addRoot(root)
+		if root and not seen[root] then
+			seen[root] = true
+			roots[#roots + 1] = root
+		end
+	end
+
+	local ok, hidden = pcall(function()
+		return gethui and gethui()
+	end)
+	if ok then
+		addRoot(hidden)
+	end
+
+	local ok2, core = pcall(function()
+		return game:GetService("CoreGui")
+	end)
+	if ok2 then
+		addRoot(core)
+	end
+
+	if Players.LocalPlayer then
+		addRoot(Players.LocalPlayer:FindFirstChild("PlayerGui"))
+	end
+
+	for _, root in ipairs(roots) do
+		local doomed = {}
+		for _, inst in ipairs(root:GetDescendants()) do
+			if (inst.Name == "VexityKeySystem" or inst.Name == "VexityHub") and inst:IsA("ScreenGui") then
+				doomed[#doomed + 1] = inst
+			end
+		end
+		for _, inst in ipairs(doomed) do
+			pcall(function()
+				inst:Destroy()
+			end)
+		end
+	end
+
+	for _, effect in ipairs(Lighting:GetChildren()) do
+		if effect:IsA("BlurEffect") and effect.Name:match("^VexityBlur") then
+			pcall(function()
+				effect:Destroy()
+			end)
+		end
+	end
+end
+
+-- ============================================================
+-- EARLY AUTO-AUTH: saved valid key -> skip the key GUI entirely,
+-- load straight into the loader (instant).
+-- ============================================================
+do
+	local function norm(v) return tostring(v or ""):gsub("%s+", ""):lower() end
+	local saved
+	if type(isfile) == "function" and type(readfile) == "function" then
+		local ok, exists = pcall(isfile, CONFIG.SaveFile)
+		if ok and exists then
+			local ok2, contents = pcall(readfile, CONFIG.SaveFile)
+			if ok2 and type(contents) == "string" then
+				saved = contents:gsub("^%s+", ""):gsub("%s+$", "")
+			end
+		end
+	end
+	if saved and CONFIG.ValidKeys[norm(saved)] == true then
+		print("[vexity.wtf] Saved key found — loading instantly (GUI skipped)")
+		VexityNotify("Already authorized — saved key found", "good")
+		task.wait(3)
+		runVexityLoader()
+		return
+	end
+end
+
+-- ============================================================
+-- ROOT GUI
+-- ============================================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "VexityHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.DisplayOrder = 2147483647
+
+local guiParent
+do
+	local ok, hidden = pcall(function()
+		return gethui and gethui()
+	end)
+	if ok and hidden then
+		guiParent = hidden
+	end
+	if not guiParent then
+		local ok2, core = pcall(function()
+			return game:GetService("CoreGui")
+		end)
+		if ok2 then
+			guiParent = core
+		end
+	end
+	if not guiParent and Players.LocalPlayer then
+		guiParent = Players.LocalPlayer:FindFirstChild("PlayerGui")
+	end
+end
+
+local parented = pcall(function()
+	ScreenGui.Parent = guiParent
+end)
+if not parented or not ScreenGui.Parent then
+	if Players.LocalPlayer then
+		ScreenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	end
+end
+if not ScreenGui.Parent then
+	ScreenGui.Parent = game:GetService("CoreGui")
+end
+
+do
+	local ok, env = pcall(function()
+		return getgenv and getgenv() or _G
+	end)
+	if ok and env then
+		for _, name in ipairs({ "protect_gui", "protectgui" }) do
+			local fn = env[name]
+			if type(fn) == "function" then
+				pcall(fn, ScreenGui)
+			end
+		end
+	end
+	if syn and syn.protect_gui then
+		pcall(syn.protect_gui, ScreenGui)
+	end
+end
+
+-- Phones clip GUIs to the device safe area by default; opt out so the
+-- backdrop/blur can reach notched and rounded-corner screens edge to edge.
+pcall(function()
+	ScreenGui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.None
+end)
+pcall(function()
+	ScreenGui.ClipToDeviceSafeArea = false
+end)
+
+-- ============================================================
+-- FULL-SCREEN BLUR (stacked for maximum blur) + BACKDROP
+-- ============================================================
+
+local blurs = {}
+for i = 1, 2 do
+	local blur = Instance.new("BlurEffect")
+	blur.Name = "VexityBlur" .. i
+	blur.Size = 0
+	blur.Parent = Lighting
+	blurs[#blurs + 1] = blur
+	tween(blur, 0.55 + i * 0.08, { Size = 56 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+end
+
+-- Full-screen backdrop. Extra-oversized + centered so every pixel of the
+-- screen is covered, even on notched/rounded Android screens.
+local Backdrop = Instance.new("Frame")
+Backdrop.Name = "Backdrop"
+Backdrop.AnchorPoint = Vector2.new(0.5, 0.5)
+Backdrop.Position = UDim2.fromScale(0.5, 0.5)
+Backdrop.Size = UDim2.fromScale(2.2, 2.2)
+Backdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Backdrop.BackgroundTransparency = 1
+Backdrop.BorderSizePixel = 0
+Backdrop.Active = true
+Backdrop.ZIndex = 1
+Backdrop.Parent = ScreenGui
+tween(Backdrop, 0.55, { BackgroundTransparency = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local rng = Random.new()
+
+local Snow = Instance.new("Frame")
+Snow.Name = "Snow"
+Snow.Size = UDim2.fromScale(1, 1)
+Snow.BackgroundTransparency = 1
+Snow.BorderSizePixel = 0
+Snow.ClipsDescendants = true
+Snow.ZIndex = 2
+Snow.Parent = Backdrop
+
+local flakes = {}
+for _ = 1, 120 do
+	local diameter = rng:NextInteger(2, 5)
+	local flake = Instance.new("Frame")
+	flake.Size = UDim2.fromOffset(diameter, diameter)
+	flake.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	flake.BackgroundTransparency = rng:NextNumber(0.35, 0.78)
+	flake.AnchorPoint = Vector2.new(0.5, 0.5)
+	flake.Position = UDim2.new(rng:NextNumber(0, 1), 0, rng:NextNumber(-0.2, 0), 0)
+	flake.BorderSizePixel = 0
+	flake.ZIndex = 2
+	flake.Parent = Snow
+	corner(flake, diameter / 2)
+	flakes[#flakes + 1] = {
+		frame = flake,
+		speed = rng:NextNumber(0.04, 0.11),
+		drift = rng:NextNumber(-0.025, 0.025),
+		phase = rng:NextNumber(0, math.pi * 2),
+	}
+end
+
+local snowAccumulator = 0
+local snowConnection
+snowConnection = RunService.Heartbeat:Connect(function(delta)
+	if not ScreenGui.Parent then
+		if snowConnection then
+			snowConnection:Disconnect()
+		end
+		return
+	end
+
+	snowAccumulator += math.min(delta, 0.1)
+	if snowAccumulator < 1 / 30 then
+		return
+	end
+	local step = snowAccumulator
+	snowAccumulator = 0
+
+	for _, flake in ipairs(flakes) do
+		flake.phase += step
+		local x = flake.frame.Position.X.Scale + (flake.drift + math.sin(flake.phase * 2) * 0.012) * step * 4
+		local y = flake.frame.Position.Y.Scale + flake.speed * step
+		if y > 1.05 then
+			y = rng:NextNumber(-0.15, -0.05)
+			x = rng:NextNumber(0, 1)
+		end
+		flake.frame.Position = UDim2.new(x, 0, y, 0)
+	end
+end)
+
+-- ============================================================
+-- PANEL
+-- ============================================================
+
+local BASE_WIDTH, BASE_HEIGHT = 440, 366
+local Panel = Instance.new("Frame")
+Panel.Name = "Panel"
+Panel.AnchorPoint = Vector2.new(0.5, 0.5)
+Panel.Position = UDim2.new(0.5, 0, 0.56, 0)
+Panel.Size = UDim2.fromOffset(BASE_WIDTH, BASE_HEIGHT)
+Panel.BackgroundColor3 = T.Bg
+Panel.BackgroundTransparency = 1
+Panel.BorderSizePixel = 0
+Panel.ZIndex = 3
+Panel.Parent = Backdrop
+corner(Panel, 16)
+
+local PanelShadow = Instance.new("Frame")
+PanelShadow.Name = "Shadow"
+PanelShadow.AnchorPoint = Vector2.new(0, 0)
+PanelShadow.Position = UDim2.fromOffset(0, 8)
+PanelShadow.Size = UDim2.fromScale(1, 1)
+PanelShadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+PanelShadow.BackgroundTransparency = 1
+PanelShadow.BorderSizePixel = 0
+PanelShadow.ZIndex = 2
+PanelShadow.Parent = Panel
+corner(PanelShadow, 18)
+
+local PanelStroke = stroke(Panel, T.Stroke, 1)
+PanelStroke.Transparency = 1
+local panelStrokeGradient = Instance.new("UIGradient")
+panelStrokeGradient.Rotation = 90
+panelStrokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, T.StrokeHi),
+	ColorSequenceKeypoint.new(1, T.Stroke),
+})
+panelStrokeGradient.Parent = PanelStroke
+
+local panelGradient = Instance.new("UIGradient")
+panelGradient.Rotation = 90
+panelGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromHex("#111111")),
+	ColorSequenceKeypoint.new(1, T.Bg),
+})
+panelGradient.Parent = Panel
+
+local PanelScale = Instance.new("UIScale")
+PanelScale.Parent = Panel
+
+local function computeScale()
+	local camera = workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(BASE_WIDTH, BASE_HEIGHT)
+	local scale = math.min((viewport.X - 24) / BASE_WIDTH, (viewport.Y - 28) / BASE_HEIGHT, 1)
+	return math.clamp(scale, 0.35, 1)
+end
+
+local targetScale = computeScale()
+PanelScale.Scale = targetScale * 0.94
+
+local function updateScale()
+	targetScale = computeScale()
+	PanelScale.Scale = targetScale
+end
+
+local camera = workspace.CurrentCamera
+if camera then
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+end
+pcall(function()
+	ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
+end)
+
+-- ============================================================
+-- HEADER
+-- ============================================================
+
+local LogoHolder = Instance.new("Frame")
+LogoHolder.Name = "Logo"
+LogoHolder.Position = UDim2.fromOffset(16, 14)
+LogoHolder.Size = UDim2.fromOffset(36, 30)
+LogoHolder.BackgroundColor3 = T.Surface2
+LogoHolder.BorderSizePixel = 0
+LogoHolder.ClipsDescendants = true
+LogoHolder.ZIndex = 4
+LogoHolder.Parent = Panel
+corner(LogoHolder, 8)
+
+local LogoInitial = label(LogoHolder, "V", 15, T.White, Enum.Font.GothamBlack, {
+	Size = UDim2.fromScale(1, 1),
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextYAlignment = Enum.TextYAlignment.Center,
+	ZIndex = 5,
+})
+
+local LogoImage = Instance.new("ImageLabel")
+LogoImage.Name = "Image"
+LogoImage.Size = UDim2.fromScale(1, 1)
+LogoImage.BackgroundTransparency = 1
+LogoImage.BorderSizePixel = 0
+-- Logo ID taken from vexity base.txt (LOGO_ID)
+LogoImage.Image = "rbxassetid://72558098168066"
+LogoImage.ImageTransparency = 0
+LogoImage.ScaleType = Enum.ScaleType.Fit
+LogoImage.ZIndex = 6
+LogoImage.Parent = LogoHolder
+
+label(Panel, "vexity.wtf", 17, T.White, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(60, 6),
+	Size = UDim2.fromOffset(190, 18),
+	ZIndex = 4,
+})
+label(Panel, "", 9, T.Muted, Enum.Font.Gotham, {
+	Position = UDim2.fromOffset(60, 23),
+	Size = UDim2.fromOffset(190, 12),
+	ZIndex = 4,
+})
+label(Panel, "made by cursed", 8, T.Muted, Enum.Font.GothamMedium, {
+	Position = UDim2.fromOffset(60, 34),
+	Size = UDim2.fromOffset(190, 11),
+	TextTransparency = 0.25,
+	ZIndex = 4,
+})
+
+local HeaderPill = Instance.new("TextButton")
+HeaderPill.Name = "Status"
+HeaderPill.AnchorPoint = Vector2.new(1, 0)
+HeaderPill.Position = UDim2.new(1, -16, 0, 18)
+HeaderPill.Size = UDim2.fromOffset(112, 20)
+HeaderPill.BackgroundColor3 = T.Surface
+HeaderPill.BackgroundTransparency = 0.2
+HeaderPill.BorderSizePixel = 0
+HeaderPill.Text = ""
+HeaderPill.AutoButtonColor = false
+HeaderPill.ZIndex = 8
+HeaderPill.Parent = Panel
+corner(HeaderPill, 10)
+local HeaderPillStroke = stroke(HeaderPill, currentInfo.color, 1)
+HeaderPillStroke.Transparency = 0.82
+
+local HeaderDot = dot(HeaderPill, currentInfo.color, 8, 6, 7)
+HeaderDot.ZIndex = 9
+local HeaderText = label(HeaderPill, currentInfo.short, 8, currentInfo.color, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(18, 0),
+	Size = UDim2.new(1, -26, 1, 0),
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 9,
+})
+
+-- Clicking the status pill (e.g. "Unsupported") used to fall through to the
+-- header drag area and bug out / sink the GUI. Make it a real button with
+-- proper feedback instead of swallowing the click.
+HeaderPill.MouseButton1Click:Connect(function()
+	if currentGame then
+		notify(currentInfo.text .. " — optimized script available", "info")
+	else
+		notify("This game isn't supported yet — universal script will run", "info")
+	end
+end)
+HeaderPill.MouseEnter:Connect(function()
+	tween(HeaderPill, 0.15, { BackgroundTransparency = 0 })
+end)
+HeaderPill.MouseLeave:Connect(function()
+	tween(HeaderPill, 0.15, { BackgroundTransparency = 0.2 })
+end)
+
+-- Drag area over the header only (doesn't cover the tabs/buttons).
+local HeaderDrag = Instance.new("Frame")
+HeaderDrag.Name = "DragArea"
+HeaderDrag.Position = UDim2.fromOffset(0, 0)
+HeaderDrag.Size = UDim2.new(1, 0, 0, 50)
+HeaderDrag.BackgroundTransparency = 1
+HeaderDrag.BorderSizePixel = 0
+HeaderDrag.Active = false
+HeaderDrag.Visible = false
+HeaderDrag.ZIndex = 1
+HeaderDrag.Parent = Panel
+
+-- ============================================================
+-- TABS
+-- ============================================================
+
+local TabBar = Instance.new("Frame")
+TabBar.Name = "Tabs"
+TabBar.Position = UDim2.fromOffset(16, 54)
+TabBar.Size = UDim2.new(1, -32, 0, 31)
+TabBar.BackgroundColor3 = T.Surface
+TabBar.BorderSizePixel = 0
+TabBar.ZIndex = 4
+TabBar.Parent = Panel
+corner(TabBar, 9)
+stroke(TabBar, T.Stroke, 1)
+
+local TabPadding = Instance.new("UIPadding")
+TabPadding.PaddingLeft = UDim.new(0, 3)
+TabPadding.PaddingRight = UDim.new(0, 3)
+TabPadding.PaddingTop = UDim.new(0, 3)
+TabPadding.PaddingBottom = UDim.new(0, 3)
+TabPadding.Parent = TabBar
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.Padding = UDim.new(0, 3)
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Parent = TabBar
+
+local function makeTab(text, order)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0.5, -5, 1, 0)
+	button.BackgroundColor3 = T.Surface
+	button.BorderSizePixel = 0
+	button.Text = text
+	button.TextSize = 12
+	button.Font = Enum.Font.GothamBold
+	button.TextColor3 = T.Muted
+	button.AutoButtonColor = false
+	button.LayoutOrder = order
+	button.ZIndex = 4
+	button.Parent = TabBar
+	corner(button, 7)
+
+	local line = Instance.new("Frame")
+	line.Name = "ActiveLine"
+	line.AnchorPoint = Vector2.new(0.5, 1)
+	line.Position = UDim2.new(0.5, 0, 1, -3)
+	line.Size = UDim2.new(0, 0, 0, 2)
+	line.BackgroundColor3 = T.White
+	line.BackgroundTransparency = 1
+	line.BorderSizePixel = 0
+	line.ZIndex = 5
+	line.Parent = button
+	corner(line, 1)
+
+	return button, line
+end
+
+local KeyTab, KeyTabLine = makeTab("Key", 1)
+local GamesTab, GamesTabLine = makeTab("Games", 2)
+
+local KeyPage = Instance.new("Frame")
+KeyPage.Name = "KeyPage"
+KeyPage.Position = UDim2.fromOffset(16, 93)
+KeyPage.Size = UDim2.new(1, -32, 1, -105)
+KeyPage.BackgroundTransparency = 1
+KeyPage.BorderSizePixel = 0
+KeyPage.ZIndex = 4
+KeyPage.Parent = Panel
+
+local GamesPage = Instance.new("Frame")
+GamesPage.Name = "GamesPage"
+GamesPage.Position = UDim2.fromOffset(16, 93)
+GamesPage.Size = UDim2.new(1, -32, 1, -105)
+GamesPage.BackgroundTransparency = 1
+GamesPage.BorderSizePixel = 0
+GamesPage.Visible = false
+GamesPage.ZIndex = 4
+GamesPage.Parent = Panel
+
+local function styleTab(button, line, active)
+	local targetBackground = active and T.Surface2 or T.Surface
+	local targetText = active and T.White or T.Muted
+	tween(button, 0.16, {
+		BackgroundColor3 = targetBackground,
+		TextColor3 = targetText,
+	})
+	tween(line, 0.2, {
+		Size = active and UDim2.new(0, 18, 0, 2) or UDim2.new(0, 0, 0, 2),
+		BackgroundTransparency = active and 0 or 1,
+	})
+end
+
+local TAB_Y = 93
+
+local function selectTab(which)
+	local keyActive = which == "key"
+	local showPage = keyActive and KeyPage or GamesPage
+	local hidePage = keyActive and GamesPage or KeyPage
+
+	hidePage.Visible = false
+	showPage.Visible = true
+	-- Smooth slide + fade-in for the incoming page
+	showPage.Position = UDim2.fromOffset(16, TAB_Y + 14)
+	tween(showPage, 0.32, { Position = UDim2.fromOffset(16, TAB_Y) },
+		Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+	styleTab(KeyTab, KeyTabLine, keyActive)
+	styleTab(GamesTab, GamesTabLine, not keyActive)
+end
+
+KeyTab.MouseButton1Click:Connect(function()
+	selectTab("key")
+end)
+GamesTab.MouseButton1Click:Connect(function()
+	selectTab("games")
+end)
+
+KeyTab.MouseEnter:Connect(function()
+	if not KeyPage.Visible then
+		tween(KeyTab, 0.13, { BackgroundColor3 = T.Surface2, TextColor3 = T.Text })
+	end
+end)
+KeyTab.MouseLeave:Connect(function()
+	if not KeyPage.Visible then
+		tween(KeyTab, 0.13, { BackgroundColor3 = T.Surface, TextColor3 = T.Muted })
+	end
+end)
+GamesTab.MouseEnter:Connect(function()
+	if not GamesPage.Visible then
+		tween(GamesTab, 0.13, { BackgroundColor3 = T.Surface2, TextColor3 = T.Text })
+	end
+end)
+GamesTab.MouseLeave:Connect(function()
+	if not GamesPage.Visible then
+		tween(GamesTab, 0.13, { BackgroundColor3 = T.Surface, TextColor3 = T.Muted })
+	end
+end)
+
+-- ============================================================
+-- KEY PAGE
+-- ============================================================
+
+local GameCard = Instance.new("Frame")
+GameCard.Name = "GameCard"
+GameCard.Position = UDim2.fromOffset(0, 0)
+GameCard.Size = UDim2.new(1, 0, 0, 50)
+GameCard.BackgroundColor3 = T.Surface
+GameCard.BorderSizePixel = 0
+GameCard.ZIndex = 4
+GameCard.Parent = KeyPage
+corner(GameCard, 10)
+local GameCardStroke = stroke(GameCard, T.Stroke, 1)
+
+local ThumbInitial
+local ThumbImage
+do
+	local holder, image, text = makeIcon(GameCard, 36, currentGame and initials(currentGame.name) or initials(currentPlaceName))
+	holder.Position = UDim2.fromOffset(7, 7)
+	ThumbImage = image
+	ThumbInitial = text
+end
+
+local CardName = label(GameCard, currentGame and currentGame.name or currentPlaceName, 12, T.Text, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(50, 6),
+	Size = UDim2.new(1, -84, 0, 17),
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+})
+
+local CardSub = label(GameCard, currentInfo.text .. " · optimized script", 9, currentInfo.color, Enum.Font.Gotham, {
+	Position = UDim2.fromOffset(50, 24),
+	Size = UDim2.new(1, -84, 0, 14),
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+})
+
+local CardDot = dot(GameCard, currentInfo.color, 0, 0, 9)
+CardDot.AnchorPoint = Vector2.new(1, 0.5)
+CardDot.Position = UDim2.new(1, -12, 0.5, 0)
+CardDot.ZIndex = 5
+
+-- license key
+label(KeyPage, "LICENSE KEY", 9, T.Muted, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(2, 60),
+	Size = UDim2.fromOffset(200, 12),
+	ZIndex = 4,
+})
+
+local KeyBox = Instance.new("TextBox")
+KeyBox.Name = "KeyBox"
+KeyBox.Position = UDim2.fromOffset(0, 74)
+KeyBox.Size = UDim2.new(1, 0, 0, 40)
+KeyBox.BackgroundColor3 = T.Surface
+KeyBox.BorderSizePixel = 0
+KeyBox.Text = ""
+KeyBox.PlaceholderText = "Paste your key here"
+KeyBox.PlaceholderColor3 = T.Muted
+KeyBox.TextColor3 = T.White
+KeyBox.TextSize = 13
+KeyBox.Font = Enum.Font.GothamMedium
+KeyBox.ClearTextOnFocus = false
+KeyBox.TextTruncate = Enum.TextTruncate.AtEnd
+KeyBox.ZIndex = 4
+KeyBox.Parent = KeyPage
+corner(KeyBox, 10)
+local KeyStroke = stroke(KeyBox, T.Stroke, 1)
+
+local KeyPadding = Instance.new("UIPadding")
+KeyPadding.PaddingLeft = UDim.new(0, 12)
+KeyPadding.PaddingRight = UDim.new(0, 12)
+KeyPadding.Parent = KeyBox
+
+local SavedBadge = label(KeyBox, "SAVED", 8, T.Green, Enum.Font.GothamBold, {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -10, 0.5, 0),
+	Size = UDim2.fromOffset(44, 12),
+	TextXAlignment = Enum.TextXAlignment.Right,
+	Visible = false,
+	ZIndex = 5,
+})
+
+KeyBox.Focused:Connect(function()
+	tween(KeyStroke, 0.15, { Color = T.StrokeHi })
+end)
+KeyBox.FocusLost:Connect(function()
+	tween(KeyStroke, 0.2, { Color = T.Stroke })
+end)
+
+-- unlock button
+local SubmitBtn = Instance.new("TextButton")
+SubmitBtn.Name = "Unlock"
+SubmitBtn.Position = UDim2.fromOffset(0, 120)
+SubmitBtn.Size = UDim2.new(1, 0, 0, 40)
+SubmitBtn.BackgroundColor3 = T.White
+SubmitBtn.BorderSizePixel = 0
+SubmitBtn.Text = "ENTER"
+SubmitBtn.TextSize = 13
+SubmitBtn.Font = Enum.Font.GothamBlack
+SubmitBtn.TextColor3 = T.Bg
+SubmitBtn.AutoButtonColor = false
+SubmitBtn.ClipsDescendants = true
+SubmitBtn.ZIndex = 4
+SubmitBtn.Parent = KeyPage
+corner(SubmitBtn, 10)
+
+local Shine = Instance.new("Frame")
+Shine.Name = "Shine"
+Shine.Size = UDim2.fromScale(0.16, 1)
+Shine.BackgroundColor3 = T.White
+Shine.BackgroundTransparency = 0.5
+Shine.BorderSizePixel = 0
+Shine.ZIndex = 5
+Shine.Parent = SubmitBtn
+corner(Shine, 10)
+
+-- get key button
+local GetKeyBtn = Instance.new("TextButton")
+GetKeyBtn.Name = "GetKey"
+GetKeyBtn.Position = UDim2.fromOffset(0, 166)
+GetKeyBtn.Size = UDim2.new(1, 0, 0, 40)
+GetKeyBtn.BackgroundColor3 = T.Surface2
+GetKeyBtn.BorderSizePixel = 0
+GetKeyBtn.Text = "GET A KEY"
+GetKeyBtn.TextSize = 13
+GetKeyBtn.Font = Enum.Font.GothamBold
+GetKeyBtn.TextColor3 = T.White
+GetKeyBtn.AutoButtonColor = false
+GetKeyBtn.ZIndex = 4
+GetKeyBtn.Parent = KeyPage
+corner(GetKeyBtn, 10)
+local GetKeyStroke = stroke(GetKeyBtn, T.White, 1.5)
+GetKeyStroke.Transparency = 0.15
+
+-- note
+local NoteCard = Instance.new("Frame")
+NoteCard.Name = "Note"
+NoteCard.Position = UDim2.fromOffset(0, 214)
+NoteCard.Size = UDim2.new(1, 0, 0, 44)
+NoteCard.BackgroundColor3 = T.Surface
+NoteCard.BorderSizePixel = 0
+NoteCard.ZIndex = 4
+NoteCard.Parent = KeyPage
+corner(NoteCard, 9)
+stroke(NoteCard, T.Stroke, 1)
+label(NoteCard, "NOTE", 8, T.Muted, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(10, 6),
+	Size = UDim2.fromOffset(40, 10),
+	ZIndex = 4,
+})
+label(NoteCard, CONFIG.Note, 10, T.Text, Enum.Font.Gotham, {
+	Position = UDim2.fromOffset(10, 18),
+	Size = UDim2.new(1, -20, 0, 20),
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+})
+
+-- footer (copies discord on click)
+local Footer = Instance.new("TextButton")
+Footer.Name = "Footer"
+Footer.BackgroundTransparency = 1
+Footer.BorderSizePixel = 0
+Footer.Text = ""
+Footer.TextSize = 8
+Footer.Font = Enum.Font.Gotham
+Footer.TextColor3 = T.Muted
+Footer.TextXAlignment = Enum.TextXAlignment.Left
+Footer.TextTruncate = Enum.TextTruncate.AtEnd
+Footer.AutoButtonColor = false
+Footer.Position = UDim2.fromOffset(2, 258)
+Footer.Size = UDim2.new(1, -4, 0, 12)
+Footer.ZIndex = 4
+Footer.Parent = KeyPage
+
+-- ============================================================
+-- GAMES PAGE
+-- ============================================================
+
+label(GamesPage, "SUPPORTED GAMES", 8, T.Muted, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(2, 0),
+	Size = UDim2.fromOffset(180, 12),
+	ZIndex = 4,
+})
+
+local LiveDot = dot(GamesPage, T.Gray, 0, 0, 5)
+LiveDot.AnchorPoint = Vector2.new(1, 0)
+LiveDot.Position = UDim2.new(1, -36, 0, 4)
+LiveDot.ZIndex = 5
+local LiveText = label(GamesPage, "SYNC", 8, T.Gray, Enum.Font.GothamBold, {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -2, 0, 0),
+	Size = UDim2.fromOffset(32, 12),
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 4,
+})
+
+local List = Instance.new("ScrollingFrame")
+List.Name = "GameList"
+List.Position = UDim2.fromOffset(0, 16)
+List.Size = UDim2.new(1, 0, 1, -34)
+List.BackgroundTransparency = 1
+List.BorderSizePixel = 0
+List.ScrollBarThickness = 4
+List.ScrollBarImageColor3 = T.Surface3
+List.ScrollBarImageTransparency = 0.25
+List.CanvasSize = UDim2.fromOffset(0, (#GAMES + 1) * 52 + 8)
+List.ZIndex = 4
+List.Parent = GamesPage
+pcall(function()
+	List.AutomaticCanvasSize = Enum.AutomaticSize.Y
+end)
+
+local ListPadding = Instance.new("UIPadding")
+ListPadding.PaddingBottom = UDim.new(0, 6)
+ListPadding.PaddingRight = UDim.new(0, 2)
+ListPadding.Parent = List
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Padding = UDim.new(0, 6)
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ListLayout.Parent = List
+
+local GamesFooter = label(GamesPage, "", 8, T.Muted, Enum.Font.Gotham, {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 2, 1, 0),
+	Size = UDim2.new(1, -4, 0, 12),
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+})
+
+local function makeStatusPill(parent, info, width)
+	local pill = Instance.new("Frame")
+	pill.Name = "StatusPill"
+	pill.AnchorPoint = Vector2.new(1, 0.5)
+	pill.Position = UDim2.new(1, -10, 0.5, 0)
+	pill.Size = UDim2.fromOffset(width or 86, 18)
+	pill.BackgroundColor3 = T.Surface2
+	pill.BackgroundTransparency = 0.2
+	pill.BorderSizePixel = 0
+	pill.ZIndex = 5
+	pill.Parent = parent
+	corner(pill, 9)
+	local pillStroke = stroke(pill, info.color, 1)
+	pillStroke.Transparency = 0.82
+
+	local pillDot = dot(pill, info.color, 8, 5, 7)
+	pillDot.ZIndex = 6
+
+	local pillText = label(pill, info.short, 8, info.color, Enum.Font.GothamBold, {
+		Position = UDim2.fromOffset(17, 0),
+		Size = UDim2.new(1, -25, 1, 0),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = 6,
+	})
+
+	return pill, pillText, pillDot, pillStroke
+end
+
+local function buildGameRow(gameInfo, order)
+	local isUniversal = gameInfo == nil
+	local title = isUniversal and "Universal" or gameInfo.name
+	local info = isUniversal and STATUS.universal or STATUS[gameInfo.status]
+	local isCurrent = gameInfo ~= nil and currentGame == gameInfo
+
+	local baseColor = isUniversal and T.Surface2 or T.Surface
+	local hoverColor = T.Surface2
+	if isCurrent then
+		baseColor = T.Surface2
+		hoverColor = T.Surface3
+	end
+
+	local row = Instance.new("TextButton")
+	row.Name = "Row_" .. tostring(isUniversal and "Universal" or gameInfo.placeId)
+	row.Size = UDim2.new(1, -6, 0, 46)
+	row.BackgroundColor3 = baseColor
+	row.BorderSizePixel = 0
+	row.Text = ""
+	row.AutoButtonColor = false
+	row.LayoutOrder = order
+	row.ZIndex = 4
+	row.Parent = List
+	corner(row, 9)
+	local rowStroke = stroke(row, isCurrent and T.StrokeHi or T.Stroke, 1)
+
+	if isCurrent then
+		local accent = Instance.new("Frame")
+		accent.Name = "CurrentAccent"
+		accent.Size = UDim2.new(0, 2, 1, -14)
+		accent.Position = UDim2.fromOffset(0, 7)
+		accent.BackgroundColor3 = T.White
+		accent.BorderSizePixel = 0
+		accent.ZIndex = 5
+		accent.Parent = row
+		corner(accent, 1)
+	end
+
+	local iconHolder, iconImage, iconInitial = makeIcon(
+		row,
+		32,
+		isUniversal and "∞" or initials(title)
+	)
+	iconHolder.Position = UDim2.fromOffset(7, 7)
+	if isUniversal then
+		iconInitial.TextSize = 16
+	end
+
+	local nameLabel = label(row, title, 12, T.Text, Enum.Font.GothamBold, {
+		Position = UDim2.fromOffset(47, 4),
+		Size = UDim2.new(1, -170, 0, 16),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 5,
+	})
+
+	local subtitle = isUniversal
+		and "Works everywhere · fallback script"
+		or ("ID " .. tostring(gameInfo.placeId) .. " · optimized script")
+
+	local subLabel = label(row, subtitle, 9, T.Muted, Enum.Font.Gotham, {
+		Position = UDim2.fromOffset(47, 21),
+		Size = UDim2.new(1, -166, 0, 14),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 5,
+	})
+
+	makeStatusPill(row, info, 86)
+
+	row.MouseEnter:Connect(function()
+		if rowStroke.Parent then
+			tween(rowStroke, 0.15, { Color = T.StrokeHi })
+			tween(row, 0.15, { BackgroundColor3 = hoverColor })
+		end
+	end)
+	row.MouseLeave:Connect(function()
+		if rowStroke.Parent then
+			tween(rowStroke, 0.15, { Color = isCurrent and T.StrokeHi or T.Stroke })
+			tween(row, 0.15, { BackgroundColor3 = baseColor })
+		end
+	end)
+
+	row.MouseButton1Click:Connect(function()
+		if isUniversal then
+			notify("Universal script works in any game", "info")
+			return
+		end
+		local copied = copyValue(gameInfo.placeId)
+		notify(
+			copied
+				and ("PlaceId " .. tostring(gameInfo.placeId) .. " copied")
+				or ("PlaceId " .. tostring(gameInfo.placeId)),
+			copied and "good" or "info"
+		)
+	end)
+
+	if not isUniversal then
+		gameViews[gameInfo.placeId] = {
+			row = row,
+			name = nameLabel,
+			sub = subLabel,
+			icon = iconImage,
+			initial = iconInitial,
+		}
+		if gameInfo.universeId then
+			setIcon(iconImage, iconURL(gameInfo.universeId))
+		end
+	end
+
+	return row
+end
+
+for index, gameInfo in ipairs(GAMES) do
+	buildGameRow(gameInfo, index)
+end
+buildGameRow(nil, 99)
+
+-- ============================================================
+-- NOTIFY
+-- ============================================================
+
+local Notify = Instance.new("Frame")
+Notify.Name = "Notify"
+Notify.AnchorPoint = Vector2.new(0.5, 1)
+Notify.Position = UDim2.new(0.5, 0, 1.055, 0)
+Notify.Size = UDim2.fromOffset(320, 36)
+Notify.BackgroundColor3 = T.Surface2
+Notify.BorderSizePixel = 0
+Notify.ZIndex = 10
+Notify.Parent = Backdrop
+corner(Notify, 10)
+local NotifyStroke = stroke(Notify, T.StrokeHi, 1)
+NotifyStroke.Transparency = 0.35
+
+local NotifyIcon = label(Notify, "i", 12, T.White, Enum.Font.GothamBold, {
+	Position = UDim2.fromOffset(10, 0),
+	Size = UDim2.fromOffset(22, 36),
+	TextXAlignment = Enum.TextXAlignment.Center,
+	ZIndex = 11,
+})
+local NotifyText = label(Notify, "", 11, T.Text, Enum.Font.GothamMedium, {
+	Position = UDim2.fromOffset(34, 0),
+	Size = UDim2.new(1, -44, 1, 0),
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 11,
+})
+local NotifyBar = Instance.new("Frame")
+NotifyBar.Name = "Bar"
+NotifyBar.AnchorPoint = Vector2.new(0, 1)
+NotifyBar.Position = UDim2.new(0, 0, 1, 0)
+NotifyBar.Size = UDim2.new(1, 0, 0, 2)
+NotifyBar.BackgroundColor3 = T.White
+NotifyBar.BorderSizePixel = 0
+NotifyBar.ZIndex = 11
+NotifyBar.Parent = Notify
+corner(NotifyBar, 1)
+
+local function updateNotifyWidth()
+	local viewport = camera and camera.ViewportSize or Vector2.new(400, 300)
+	Notify.Size = UDim2.fromOffset(math.clamp(viewport.X - 24, 220, 340), 36)
+end
+updateNotifyWidth()
+if camera then
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateNotifyWidth)
+end
+
+local notifyToken = 0
+local notifyBarTween
+
+notify = VexityNotify
+-- ============================================================
+-- GAME DATA
+-- ============================================================
+
+local function httpJSON(url)
+	local ok, body = pcall(function()
+		return game:HttpGet(url, true)
+	end)
+	if not ok or type(body) ~= "string" then
+		ok, body = pcall(function()
+			return game:HttpGet(url)
+		end)
+	end
+	if not ok then
+		return nil
+	end
+	if type(body) == "table" then
+		return body
+	end
+	if type(body) ~= "string" or body == "" then
+		return nil
+	end
+	local decoded, data = pcall(function()
+		return HttpService:JSONDecode(body)
+	end)
+	if decoded then
+		return data
+	end
+	return nil
+end
+
+local function updateGamesFooter()
+	local name = currentGame
+		and (currentGame.liveName or currentGame.name)
+		or currentPlaceName
+	local parts = {
+		"You are in " .. tostring(name),
+		tostring(#GAMES) .. " supported",
+		dataLoaded and "Live data" or "Static data",
+	}
+	GamesFooter.Text = table.concat(parts, " · ")
+	GamesFooter.TextColor3 = currentGame and currentInfo.color or T.Gray
+
+	LiveDot.BackgroundColor3 = dataLoaded and T.Green or T.Gray
+	LiveText.Text = dataLoaded and "LIVE" or "SYNC"
+	LiveText.TextColor3 = dataLoaded and T.Green or T.Gray
+end
+
+local function updateGameRow(gameInfo)
+	local view = gameViews[gameInfo.placeId]
+	if not view then
+		return
+	end
+
+	local name = gameInfo.liveName or gameInfo.name
+	view.name.Text = name
+	view.initial.Text = initials(name)
+
+	local parts = { "ID " .. tostring(gameInfo.placeId) }
+	if gameInfo.playing then
+		parts[#parts + 1] = formatCount(gameInfo.playing) .. " playing"
+	end
+	if gameInfo.creator and gameInfo.creator ~= "" then
+		parts[#parts + 1] = "by " .. gameInfo.creator
+	end
+	if not gameInfo.playing then
+		parts[#parts + 1] = "optimized script"
+	end
+	view.sub.Text = table.concat(parts, " · ")
+
+	if gameInfo.universeId then
+		setIcon(view.icon, iconURL(gameInfo.universeId))
+	end
+end
+
+local function updateCard()
+	if not ScreenGui.Parent then
+		return
+	end
+
+	local name
+	local info
+	local playing
+	local creator
+
+	if currentGame then
+		info = currentInfo
+		name = currentGame.liveName or currentGame.name
+		playing = currentGame.playing
+		creator = currentGame.creator
+	else
+		info = STATUS.unsupported
+		name = currentPlaceName
+		playing = nil
+		creator = nil
+	end
+
+	CardName.Text = name
+	CardSub.TextColor3 = info.color
+	CardDot.BackgroundColor3 = info.color
+	ThumbInitial.Text = initials(name)
+
+	if currentGame then
+		local sub = info.text .. " · " .. (playing and (formatCount(playing) .. " playing") or "optimized script")
+		if creator and creator ~= "" then
+			sub ..= " · by " .. creator
+		end
+		CardSub.Text = sub
+	else
+		CardSub.Text = "Not supported · universal script will run"
+	end
+
+	HeaderDot.BackgroundColor3 = info.color
+	HeaderText.Text = info.short
+	HeaderText.TextColor3 = info.color
+	HeaderPillStroke.Color = info.color
+	HeaderPillStroke.Transparency = 0.82
+
+	local universeId = currentUniverseId()
+	if universeId then
+		setIcon(ThumbImage, iconURL(universeId))
+	end
+
+	updateGamesFooter()
+end
+
+local function fetchGameData()
+	for _, gameInfo in ipairs(GAMES) do
+		if not gameInfo.universeId and gameInfo.placeId then
+			local resolved = httpJSON(
+				"https://apis.roblox.com/universes/v1/places/"
+					.. tostring(gameInfo.placeId)
+					.. "/universe"
+			)
+			if resolved and tonumber(resolved.universeId) then
+				gameInfo.universeId = tonumber(resolved.universeId)
+			end
+		end
+		if gameInfo.universeId then
+			local view = gameViews[gameInfo.placeId]
+			if view then
+				setIcon(view.icon, iconURL(gameInfo.universeId))
+			end
+		end
+	end
+
+	local universeIds = {}
+	for _, gameInfo in ipairs(GAMES) do
+		if gameInfo.universeId then
+			universeIds[#universeIds + 1] = tostring(gameInfo.universeId)
+		end
+	end
+	if #universeIds == 0 then
+		return
+	end
+
+	local payload = httpJSON(
+		"https://games.roblox.com/v1/games?universeIds=" .. table.concat(universeIds, ",")
+	)
+	if not payload or type(payload.data) ~= "table" then
+		return
+	end
+
+	dataLoaded = true
+	local byId = {}
+	for _, info in ipairs(payload.data) do
+		byId[tonumber(info.id)] = info
+	end
+
+	for _, gameInfo in ipairs(GAMES) do
+		local info = gameInfo.universeId and byId[tonumber(gameInfo.universeId)]
+		if info then
+			local cleaned = cleanName(info.name)
+			if cleaned ~= "" then
+				gameInfo.liveName = cleaned
+			end
+			if info.creator and type(info.creator.name) == "string" then
+				gameInfo.creator = info.creator.name
+			end
+			gameInfo.playing = tonumber(info.playing) or gameInfo.playing
+			updateGameRow(gameInfo)
+		end
+	end
+end
+
+task.spawn(function()
+	local ok, err = pcall(fetchGameData)
+	if not ok then
+		warn("[vexity.wtf] game data: " .. tostring(err))
+	end
+	if ScreenGui.Parent then
+		updateCard()
+		updateGamesFooter()
+	end
+end)
+
+-- Fallback name lookup for the current place (works even when the game isn't supported).
+task.spawn(function()
+	if currentGame then
+		return
+	end
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(game.PlaceId)
+	end)
+	if ok and info and type(info.Name) == "string" then
+		local cleaned = cleanName(info.Name)
+		if cleaned ~= "" then
+			currentPlaceName = cleaned
+			if ScreenGui.Parent then
+				updateCard()
+			end
+		end
+	end
+end)
+
+-- ============================================================
+-- KEY BEHAVIOR
+-- ============================================================
+
+local busy = false
+local savedKey
+
+local function normalizeKey(value)
+	return tostring(value or ""):gsub("%s+", ""):lower()
+end
+
+local function isKeyValid(value)
+	local attempt = normalizeKey(value)
+	for key, valid in pairs(CONFIG.ValidKeys) do
+		if valid and normalizeKey(key) == attempt then
+			return true
+		end
+	end
+	return false
+end
+
+local function loadSavedKey()
+	if type(isfile) ~= "function" or type(readfile) ~= "function" then
+		return nil
+	end
+	local ok, exists = pcall(isfile, CONFIG.SaveFile)
+	if not ok or not exists then
+		return nil
+	end
+	local readOk, contents = pcall(readfile, CONFIG.SaveFile)
+	if not readOk or type(contents) ~= "string" then
+		return nil
+	end
+	return contents:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function saveKey(value)
+	if type(writefile) ~= "function" then
+		return
+	end
+	pcall(writefile, CONFIG.SaveFile, tostring(value))
+end
+
+savedKey = loadSavedKey()
+if savedKey and isKeyValid(savedKey) then
+	KeyBox.Text = savedKey
+	SavedBadge.Visible = true
+	KeyPadding.PaddingRight = UDim.new(0, 58)
+end
+
+KeyBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if not SavedBadge.Visible then
+		return
+	end
+	if normalizeKey(KeyBox.Text) ~= normalizeKey(savedKey) then
+		SavedBadge.Visible = false
+		KeyPadding.PaddingRight = UDim.new(0, 12)
+	end
+end)
+
+local busyToken = 0
+
+local function setBusy(state)
+	busy = state
+	SubmitBtn.Text = state and "CHECKING" or "ENTER"
+	tween(SubmitBtn, 0.15, {
+		BackgroundColor3 = state and T.Surface3 or T.White,
+	})
+	SubmitBtn.TextColor3 = state and T.Muted or T.Bg
+	Shine.Visible = not state
+	if state then
+		-- Fail-safe: never leave the key stuck on "CHECKING" if a thread dies mid-check.
+		busyToken += 1
+		local token = busyToken
+		task.delay(9, function()
+			if not (busy and busyToken == token) then
+				return
+			end
+			if ScreenGui.Parent then
+				pcall(setBusy, false)
+			else
+				busy = false
+			end
+		end)
+	end
+end
+
+local function shakePanel()
+	local base = Panel.Position
+	for index = 1, 6 do
+		local direction = (index % 2 == 0) and 1 or -1
+		Panel.Position = base + UDim2.fromOffset(direction * (10 - index), 0)
+		task.wait(0.045)
+	end
+	Panel.Position = base
+end
+
+local function tryLoadMainScript()
+	local url = CONFIG.MainScriptURL
+	if type(url) ~= "string" or url == "" then
+		local env = getgenv and getgenv() or nil
+		if env and type(env.VexityMainScriptURL) == "string" then
+			url = env.VexityMainScriptURL
+		end
+	end
+
+	if type(url) ~= "string" or url == "" then
+		print("[vexity.wtf] Key accepted. Main script URL is empty.")
+		return
+	end
+
+	local ok, err = pcall(function()
+		local source = game:HttpGet(url)
+		local fn, compileError = loadstring(source)
+		if not fn then
+			error(compileError)
+		end
+		fn()
+	end)
+	if not ok then
+		warn("[vexity.wtf] main script failed: " .. tostring(err))
+	end
+end
+
+local function attemptKey(rawValue)
+	if busy or not ScreenGui.Parent then
+		return
+	end
+
+	local entered = tostring(rawValue or "")
+	entered = entered:gsub("^%s+", ""):gsub("%s+$", "")
+
+	if normalizeKey(entered) == "" then
+		notify("Enter your key first", "info")
+		if KeyBox.Parent then
+			KeyBox:CaptureFocus()
+		end
+		return
+	end
+
+	setBusy(true)
+	tween(Panel, 0.18, { Size = UDim2.fromOffset(452, 372) },
+		Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+	local dots = { "CHECKING", "CHECKING .", "CHECKING . .", "CHECKING . . ." }
+	for index = 1, 9 do
+		if not ScreenGui.Parent then
+			return
+		end
+		SubmitBtn.Text = dots[((index - 1) % 4) + 1]
+		task.wait(0.13)
+	end
+
+	tween(Panel, 0.22, { Size = UDim2.fromOffset(BASE_WIDTH, BASE_HEIGHT) },
+		Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	task.wait(0.2)
+
+	if isKeyValid(entered) then
+		saveKey(entered)
+		SubmitBtn.Text = "Authorized"
+		SubmitBtn.BackgroundColor3 = T.White
+		SubmitBtn.TextColor3 = T.Bg
+		Shine.Visible = false
+		notify("Key accepted — welcome to vexity.wtf", "good")
+		task.wait(0.85)
+
+		if snowConnection then
+			snowConnection:Disconnect()
+		end
+		tween(Panel, 0.35, {
+			Position = Panel.Position + UDim2.fromOffset(0, 14),
+			BackgroundTransparency = 1,
+		}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(PanelStroke, 0.35, { Transparency = 1 })
+		tween(Backdrop, 0.35, { BackgroundTransparency = 1 })
+		task.wait(0.32)
+
+		for _, blur in ipairs(blurs) do
+			tween(blur, 0.3, { Size = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		end
+		task.delay(0.4, function()
+			for _, blur in ipairs(blurs) do
+				if blur.Parent then
+					blur:Destroy()
+				end
+			end
+		end)
+
+		ScreenGui:Destroy()
+		runVexityLoader()
+		return
+	end
+
+	print("[vexity.wtf] key check: typed=" .. normalizeKey(entered)
+		.. " | accepted=vexitywowcursedxd | result=REJECTED")
+	notify("Invalid key — try again", "bad")
+	tween(KeyStroke, 0.12, { Color = T.StrokeHi })
+	task.delay(0.55, function()
+		if KeyStroke.Parent then
+			tween(KeyStroke, 0.3, { Color = T.Stroke })
+		end
+	end)
+	shakePanel()
+	setBusy(false)
+end
+
+_G.__vexityAttempt = attemptKey
+
+-- Run attempts on a scheduler thread so every task.wait inside attemptKey can
+-- always resume, even when triggered from unusual input contexts.
+local function requestAttempt(value)
+	task.spawn(attemptKey, value)
+end
+
+SubmitBtn.MouseButton1Click:Connect(function()
+	requestAttempt(KeyBox.Text)
+end)
+KeyBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		requestAttempt(KeyBox.Text)
+	end
+end)
+
+local SubmitScale = Instance.new("UIScale")
+SubmitScale.Scale = 1
+SubmitScale.Parent = SubmitBtn
+
+SubmitBtn.MouseEnter:Connect(function()
+	if not busy then
+		tween(SubmitBtn, 0.18, { BackgroundColor3 = Color3.fromHex("#EDEDED") },
+			Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		tween(SubmitScale, 0.18, { Scale = 1.03 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	end
+end)
+SubmitBtn.MouseLeave:Connect(function()
+	if not busy then
+		tween(SubmitBtn, 0.18, { BackgroundColor3 = T.White },
+			Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		tween(SubmitScale, 0.18, { Scale = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	end
+end)
+SubmitBtn.MouseButton1Down:Connect(function()
+	tween(SubmitScale, 0.09, { Scale = 0.96 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+end)
+SubmitBtn.MouseButton1Up:Connect(function()
+	tween(SubmitScale, 0.22, { Scale = 1.03 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+end)
+
+GetKeyBtn.MouseButton1Click:Connect(function()
+	local copied = copyValue(CONFIG.GetKeyURL)
+	notify(copied and "Key link copied to clipboard" or ("Get a key at " .. CONFIG.GetKeyURL),
+		copied and "good" or "info")
+	pcall(function()
+		if setclipboard then
+			setclipboard(CONFIG.GetKeyURL)
+		end
+	end)
+end)
+
+GetKeyBtn.MouseEnter:Connect(function()
+	tween(GetKeyBtn, 0.18, { BackgroundColor3 = T.Surface3, TextColor3 = T.White },
+		Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	tween(GetKeyStroke, 0.18, { Transparency = 0 })
+end)
+GetKeyBtn.MouseLeave:Connect(function()
+	tween(GetKeyBtn, 0.18, { BackgroundColor3 = T.Surface2, TextColor3 = T.White },
+		Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	tween(GetKeyStroke, 0.18, { Transparency = 0.15 })
+end)
+
+Footer.Text = tostring((function()
+	local name = "Unknown"
+	pcall(function()
+		if identifyexecutor then
+			name = identifyexecutor()
+		elseif getexecutorname then
+			name = getexecutorname()
+		end
+	end)
+	return name
+end)()) .. " · v" .. CONFIG.Version .. " · " .. CONFIG.DiscordURL
+Footer.MouseEnter:Connect(function()
+	tween(Footer, 0.15, { TextColor3 = T.Text })
+end)
+Footer.MouseLeave:Connect(function()
+	tween(Footer, 0.15, { TextColor3 = T.Muted })
+end)
+Footer.MouseButton1Click:Connect(function()
+	local copied = copyValue(CONFIG.DiscordURL)
+	notify(copied and "Discord link copied" or ("Discord: " .. CONFIG.DiscordURL),
+		copied and "good" or "info")
+end)
+
+-- ============================================================
+-- DRAGGING (disabled — GUI is fixed in place)
+-- ============================================================
+
+local entranceTween
+local scaleEntrance
+
+-- ============================================================
+-- STARTUP
+-- ============================================================
+
+selectTab("key")
+updateCard()
+
+entranceTween = tween(Panel, 0.5, {
+	Position = UDim2.new(0.5, 0, 0.5, 0),
+	BackgroundTransparency = 0,
+}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+scaleEntrance = tween(PanelScale, 0.5, { Scale = targetScale },
+	Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+tween(PanelStroke, 0.5, { Transparency = 0 })
+tween(PanelShadow, 0.5, { BackgroundTransparency = 0.55 })
+
+-- Shine loop (pauses while the button is in its checking state).
+task.spawn(function()
+	while SubmitBtn.Parent and ScreenGui.Parent do
+		if Shine.Visible then
+			Shine.Position = UDim2.new(-0.2, 0, 0, 0)
+			local shineTween = tween(Shine, 0.85,
+				{ Position = UDim2.new(1.15, 0, 0, 0) },
+				Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+			if shineTween then
+				shineTween.Completed:Wait()
+			end
+			task.wait(2.6)
+		else
+			task.wait(0.2)
+		end
+	end
+end)
+
+print("[vexity.wtf] Vexity Hub v" .. CONFIG.Version .. " loaded | accepted key: vexitywowcursedxd (case-insensitive)")
