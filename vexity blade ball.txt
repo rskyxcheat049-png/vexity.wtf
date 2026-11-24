@@ -1,0 +1,481 @@
+
+-- ============================================================
+-- VEXITY // BLADE BALL LOADER UI
+-- Standalone GUI template — placeholder selection callbacks
+-- ============================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local ENV = (getgenv and getgenv()) or _G
+
+-- SOURCE LINKS
+local LITE_URL = "https://raw.githubusercontent.com/rskyxcheat049-png/vexity.wtf/refs/heads/main/lite%20blade%20ball%20vexity.protected.lua.txt"
+local NORMAL_URL = "https://raw.githubusercontent.com/rskyxcheat049-png/vexity.wtf/refs/heads/main/vexity%20blade%20ball.protected.lua.txt"
+
+-- CONFIGURATION
+local CONFIG = {
+    Version = nil
+}
+
+local function HttpGet(url)
+    if syn and type(syn.request) == "function" then
+        local res = syn.request({ Url = url, Method = "GET" })
+        if res and res.Body then return res.Body end
+    end
+    if type(request) == "function" then
+        local res = request({ Url = url, Method = "GET" })
+        if res and res.Body then return res.Body end
+    end
+    if type(game.HttpGet) == "function" then
+        return game:HttpGet(url)
+    end
+    error("No HTTP method available in this executor")
+end
+
+-- CLEANUP PREVIOUS INSTANCE
+local previous = PlayerGui:FindFirstChild("VexityBladeBallLoader")
+if previous then
+    previous:Destroy()
+end
+
+local coreGui = game:GetService("CoreGui")
+
+pcall(function()
+    local old = coreGui:FindFirstChild("VexityBladeBallLoader")
+    if old then old:Destroy() end
+end)
+
+-- COLORS
+local COLORS = {
+    Background = Color3.fromRGB(9, 9, 12),
+    Secondary = Color3.fromRGB(16, 16, 21),
+    Hover = Color3.fromRGB(25, 25, 32),
+    Border = Color3.fromRGB(48, 48, 59),
+    White = Color3.fromRGB(245, 245, 250),
+    Muted = Color3.fromRGB(125, 125, 140),
+    Green = Color3.fromRGB(120, 240, 155),
+    Orange = Color3.fromRGB(255, 190, 90),
+    Red = Color3.fromRGB(255, 95, 95)
+}
+
+-- HELPERS
+local function Create(class, properties, parent)
+    local object = Instance.new(class)
+
+    for property, value in pairs(properties or {}) do
+        object[property] = value
+    end
+
+    object.Parent = parent
+    return object
+end
+
+local function Corner(parent, radius)
+    return Create("UICorner", {
+        CornerRadius = UDim.new(0, radius or 8)
+    }, parent)
+end
+
+local function Stroke(parent, color, thickness, transparency)
+    return Create("UIStroke", {
+        Color = color or COLORS.Border,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0
+    }, parent)
+end
+
+local function Label(parent, text, size, position, font, textSize, color)
+    return Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Text = text,
+        Size = size,
+        Position = position,
+        Font = font or Enum.Font.Gotham,
+        TextSize = textSize or 12,
+        TextColor3 = color or COLORS.White,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center
+    }, parent)
+end
+
+local function Tween(object, duration, properties)
+    local tween = TweenService:Create(
+        object,
+        TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        properties
+    )
+
+    tween:Play()
+    return tween
+end
+
+-- GUI
+local ScreenGui = Create("ScreenGui", {
+    Name = "VexityBladeBallLoader",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 999
+}, PlayerGui)
+
+local Backdrop = Create("Frame", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = Color3.new(0, 0, 0),
+    BackgroundTransparency = 0.45,
+    BorderSizePixel = 0
+}, ScreenGui)
+
+local Main = Create("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(380, 340),
+    BackgroundColor3 = COLORS.Background,
+    BorderSizePixel = 0
+}, ScreenGui)
+
+Corner(Main, 14)
+Stroke(Main, COLORS.Border, 1)
+
+Create("UISizeConstraint", {
+    MinSize = Vector2.new(290, 320),
+    MaxSize = Vector2.new(430, 360)
+}, Main)
+
+Create("UIScale", {
+    Scale = 1
+}, Main)
+
+-- Responsive sizing
+local function UpdateScale()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    local viewport = camera.ViewportSize
+    local scale = math.clamp(
+        math.min(viewport.X / 420, viewport.Y / 390),
+        0.72,
+        1
+    )
+
+    Main.Size = UDim2.fromOffset(380, 340)
+    Main:FindFirstChildOfClass("UIScale").Scale = scale
+end
+
+UpdateScale()
+
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(UpdateScale)
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateScale)
+end
+
+-- HEADER
+local Accent = Create("Frame", {
+    Size = UDim2.fromOffset(4, 32),
+    Position = UDim2.fromOffset(20, 17),
+    BackgroundColor3 = COLORS.White,
+    BorderSizePixel = 0
+}, Main)
+Corner(Accent, 3)
+
+Label(
+    Main,
+    "vexity blade ball loader",
+    UDim2.fromOffset(320, 27),
+    UDim2.fromOffset(34, 13),
+    Enum.Font.GothamBold,
+    18
+)
+
+Label(
+    Main,
+    "CHOOSE YOUR BUILD",
+    UDim2.fromOffset(250, 18),
+    UDim2.fromOffset(35, 40),
+    Enum.Font.GothamSemibold,
+    10,
+    COLORS.Muted
+)
+
+Create("Frame", {
+    Size = UDim2.new(1, -40, 0, 1),
+    Position = UDim2.fromOffset(20, 68),
+    BackgroundColor3 = COLORS.Border,
+    BorderSizePixel = 0
+}, Main)
+
+-- DRAGGING
+local dragging = false
+local dragInput
+local dragStart
+local startPosition
+
+local function UpdateDrag(input)
+    local delta = input.Position - dragStart
+
+    Main.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
+end
+
+local DragArea = Create("Frame", {
+    Size = UDim2.new(1, -90, 0, 65),
+    BackgroundTransparency = 1,
+    Active = true
+}, Main)
+
+DragArea.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Main.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+DragArea.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        UpdateDrag(input)
+    end
+end)
+
+-- STATUS
+local StatusDot = Create("Frame", {
+    Size = UDim2.fromOffset(6, 6),
+    Position = UDim2.fromOffset(20, 298),
+    BackgroundColor3 = COLORS.Muted,
+    BorderSizePixel = 0
+}, Main)
+Corner(StatusDot, 5)
+
+local Status = Label(
+    Main,
+    "Ready.",
+    UDim2.fromOffset(300, 20),
+    UDim2.fromOffset(34, 291),
+    Enum.Font.Gotham,
+    11,
+    COLORS.Muted
+)
+
+local function SetStatus(message, color)
+    Status.Text = message
+    Status.TextColor3 = color or COLORS.Muted
+    StatusDot.BackgroundColor3 = color or COLORS.Muted
+end
+
+-- SELECTION STATE
+local Selected = false
+local Buttons = {}
+
+local function SetButtonState(name)
+    for buttonName, data in pairs(Buttons) do
+        local active = buttonName == name
+
+        Tween(data.Button, 0.15, {
+            BackgroundColor3 = active and COLORS.Hover or COLORS.Secondary
+        })
+
+        data.Border.Color = active and COLORS.White or COLORS.Border
+        data.Border.Thickness = active and 1.5 or 1
+        data.Bar.BackgroundTransparency = active and 0 or 1
+    end
+end
+
+-- GUI EXIT
+local function CloseGUI()
+    if ScreenGui and ScreenGui.Parent then
+        ScreenGui:Destroy()
+    end
+end
+
+-- SELECTION CALLBACKS
+local function OnSelect(version)
+    if Selected then return end
+    Selected = true
+
+    CONFIG.Version = version
+    SetButtonState(version)
+    SetStatus("Fetching " .. version .. "...", COLORS.White)
+
+    -- hard input lock + instant disappear so no double clicks can queue a second load
+    for _, data in pairs(Buttons) do
+        data.Button.Active = false
+        data.Button.Interactable = false
+        data.Button.AutoButtonColor = false
+    end
+    if ScreenGui and ScreenGui.Parent then
+        ScreenGui.Enabled = false
+    end
+
+    local url = (version == "Lite") and LITE_URL or NORMAL_URL
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            local source = HttpGet(url)
+            if type(source) ~= "string" or source == "" then
+                error("empty response from server")
+            end
+            local fn, loadErr = loadstring(source)
+            if not fn then error(loadErr or "failed to compile") end
+            fn()
+        end)
+
+        if ok then
+            CloseGUI()
+        else
+            -- put the picker back so the error is visible and a retry is possible
+            if ScreenGui and ScreenGui.Parent then
+                ScreenGui.Enabled = true
+            end
+            for _, data in pairs(Buttons) do
+                data.Button.Active = true
+                data.Button.Interactable = true
+            end
+            Selected = false
+            SetStatus("Error: " .. tostring(err), COLORS.Red)
+        end
+    end)
+end
+
+-- OPTION BUTTONS
+local function MakeOption(y, number, name, description)
+    local Button = Create("TextButton", {
+        Size = UDim2.new(1, -40, 0, 66),
+        Position = UDim2.fromOffset(20, y),
+        BackgroundColor3 = COLORS.Secondary,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false
+    }, Main)
+
+    Corner(Button, 10)
+    local Border = Stroke(Button, COLORS.Border, 1)
+
+    local Bar = Create("Frame", {
+        Size = UDim2.fromOffset(3, 40),
+        Position = UDim2.fromOffset(0, 13),
+        BackgroundColor3 = COLORS.White,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0
+    }, Button)
+
+    Corner(Bar, 3)
+
+    Label(
+        Button,
+        number,
+        UDim2.fromOffset(30, 24),
+        UDim2.fromOffset(17, 9),
+        Enum.Font.GothamBold,
+        13,
+        COLORS.Muted
+    )
+
+    Label(
+        Button,
+        name,
+        UDim2.fromOffset(220, 25),
+        UDim2.fromOffset(50, 8),
+        Enum.Font.GothamBold,
+        16
+    )
+
+    Label(
+        Button,
+        description,
+        UDim2.new(1, -75, 0, 20),
+        UDim2.fromOffset(51, 34),
+        Enum.Font.Gotham,
+        10,
+        COLORS.Muted
+    )
+
+    local Arrow = Label(
+        Button,
+        "→",
+        UDim2.fromOffset(25, 25),
+        UDim2.new(1, -37, 0, 18),
+        Enum.Font.GothamBold,
+        16,
+        COLORS.Muted
+    )
+
+    Button.MouseEnter:Connect(function()
+        if not Selected then
+            Tween(Button, 0.12, {
+                BackgroundColor3 = COLORS.Hover
+            })
+        end
+    end)
+
+    Button.MouseLeave:Connect(function()
+        if not Selected then
+            Tween(Button, 0.12, {
+                BackgroundColor3 = COLORS.Secondary
+            })
+        end
+    end)
+
+    Button.Activated:Connect(function()
+        OnSelect(name)
+    end)
+
+    Buttons[name] = {
+        Button = Button,
+        Border = Border,
+        Bar = Bar
+    }
+end
+
+MakeOption(85, "01", "Lite", "Combat / Detections / Optimizations / World")
+MakeOption(161, "02", "Normal", "The complete Vexity experience")
+
+-- FOOTER
+Label(
+    Main,
+    "vexity.wtf   //   loader v2.0",
+    UDim2.fromOffset(220, 15),
+    UDim2.fromOffset(20, 316),
+    Enum.Font.Gotham,
+    9,
+    Color3.fromRGB(75, 75, 88)
+)
+
+-- INITIAL ANIMATION
+Main.Size = UDim2.fromOffset(350, 315)
+Main.BackgroundTransparency = 1
+Backdrop.BackgroundTransparency = 1
+
+Tween(Main, 0.3, {
+    Size = UDim2.fromOffset(380, 340),
+    BackgroundTransparency = 0
+})
+
+Tween(Backdrop, 0.3, {
+    BackgroundTransparency = 0.45
+})
+
+SetStatus("Ready.", COLORS.Muted)
